@@ -5,11 +5,12 @@ import { SessionRepository } from '../domain/repository/session.repository';
 import { EmotionRepository } from '../domain/repository/emotion.repository';
 import { UserGenrePreferenceRepository } from '../domain/repository/userGenrePreferences.repository';
 import { TrackRepository } from '../domain/repository/track.repository';
-import { userEmotionRepository } from '../domain/repository/userEmotion.repository';
+import { userEmotionRepository } from '../domain/repository/user-emotion.repository';
 import { User } from '../domain/model/User';
 import { Emotion } from '../domain/model/Emotion';
 import { Track } from '../domain/model/Track';
 import { UserGenrePreference } from '../domain/model/UserGenrePreferences';
+import { UserEmotion } from '../domain/model/UserEmotion';
 
 export type GenerateSessionCommand = {
   currentUser: Pick<User, 'id'>;
@@ -17,6 +18,13 @@ export type GenerateSessionCommand = {
   emotionEndId: number;
   duration: number; // 30, 45 ou 60 minutes
 };
+
+interface PhaseValues {
+  genreId: number;
+  bpm: number;
+  speechiness: number;
+  energy: number;
+}
 
 export class GenerateSessionUseCase implements UseCase<GenerateSessionCommand, Session> {
   constructor(
@@ -26,37 +34,6 @@ export class GenerateSessionUseCase implements UseCase<GenerateSessionCommand, S
     private readonly trackRepository: TrackRepository,
     private readonly emotionRepository: EmotionRepository,
   ) {}
-
-  async execute(command: GenerateSessionCommand): Promise<Session> {
-    const { currentUser, emotionStartId, emotionEndId, duration } = command;
-
-    // 1. Validation des émotions
-    const [startEmotion, endEmotion] = await this.validateEmotions(emotionStartId, emotionEndId);
-
-    // 2. Calcul du nombre de phases (durée / 15)
-    const numberOfPhases = Math.floor(duration / 15);
-    
-    // 3. Récupération des UserEmotions correspondantes
-    const userEmotions = await this.getUserEmotions(currentUser.id, [emotionStartId, emotionEndId]);
-    
-    // 4. Récupération des préférences de genre
-    const genrePreferences = await this.getGenrePreferences(userEmotions, numberOfPhases);
-    
-    // 5. Génération des phases avec les tracks
-    const phases = await this.generatePhases(numberOfPhases, duration, genrePreferences);
-    
-    // 6. Création de la session
-    const session = new Session(
-      0, // ID sera généré par la DB
-      currentUser.id, // Passer l'ID utilisateur (number)
-      duration,
-      startEmotion,
-      endEmotion,
-      phases
-    );
-
-    return this.sessionRepository.create(session);
-  }
 
   private async validateEmotions(startId: number, endId: number): Promise<[Emotion, Emotion]> {
     const startEmotion = await this.emotionRepository.findById(startId);
@@ -69,149 +46,246 @@ export class GenerateSessionUseCase implements UseCase<GenerateSessionCommand, S
     return [startEmotion, endEmotion];
   }
 
-  private async getUserEmotions(userId: number, emotionIds: number[]) {
-    // Vous devrez implémenter cette méthode dans votre userEmotionRepository
-    return this.userEmotionRepository.findByUserIdAndEmotionIds(userId, emotionIds);
+  private async getUserEmotions(userId: number, emotionIds: number[]): Promise<UserEmotion[]> {
+    const userEmotionArr = await this.userEmotionRepository.findByUserIdAndEmotionIds(userId, emotionIds);
+    
+    if (!userEmotionArr || userEmotionArr.length !== emotionIds.length) {
+        throw new Error('UserEmotions not found for one or both emotions');
+    }
+
+    return userEmotionArr;
+}
+
+  private async getBestGenrePreferences(userEmotions: UserEmotion[]): Promise<[UserGenrePreference, UserGenrePreference]> {
+    const startUserEmotion = userEmotions[0];
+    const endUserEmotion = userEmotions[1];
+
+    // Récupérer le meilleur genre pour chaque UserEmotion
+    const startBestGenre = await this.userGenrePreferenceRepository.findBestRatingByEmotion(startUserEmotion.id);
+    const endBestGenre = await this.userGenrePreferenceRepository.findBestRatingByEmotion(endUserEmotion.id);
+
+    if (!startBestGenre || !endBestGenre) {
+      throw new Error('Best genre preferences not found for emotions');
+    }
+
+    return [startBestGenre, endBestGenre];
   }
 
-  private async getGenrePreferences(userEmotions: any[], numberOfPhases: number) {
-    const preferences: UserGenrePreference[] = [];
-    
-    // Récupérer le genre avec le meilleur rating pour chaque émotion
-    for (const userEmotion of userEmotions) {
-      const bestGenre = await this.userGenrePreferenceRepository.findBestRatingByEmotion(userEmotion.id);
-      if (bestGenre) {
-        preferences.push(bestGenre);
-      }
-    }
+  private async getCommonGenrePreferences(
+    startUserEmotionId: number, 
+    endUserEmotionId: number
+  ): Promise<UserGenrePreference[]> {
+    // Trouver les genres communs entre les deux UserEmotions
+    return await this.userGenrePreferenceRepository.findCommonGenres(
+      [startUserEmotionId, endUserEmotionId], 3
+    );
+  }
 
-    // Récupérer les genres communs (nombre = durée/15 - 2)
-    const commonGenresCount = Math.max(0, numberOfPhases - 2);
-    if (commonGenresCount > 0) {
-      const userEmotionIds = userEmotions.map(ue => ue.id);
-      const commonGenres = await this.userGenrePreferenceRepository.findCommonGenres(
-        userEmotionIds, 
-        commonGenresCount
-      );
-      preferences.push(...commonGenres);
-    }
+  private calculateIntermediatePhaseValues(
+    startValues: PhaseValues,
+    endValues: PhaseValues,
+    phaseIndex: number,
+    totalPhases: number
+  ): PhaseValues {
+    const ratio = phaseIndex / (totalPhases - 1);
 
-    return preferences;
+    return {
+      genreId: startValues.genreId, 
+      bpm: Math.round(startValues.bpm + (endValues.bpm - startValues.bpm) * ratio),
+      speechiness: Math.round(startValues.speechiness + (endValues.speechiness - startValues.speechiness) * ratio),
+      energy: Math.round((startValues.energy + (endValues.energy - startValues.energy) * ratio) * 100) / 100
+    };
   }
 
   private async generatePhases(
-    numberOfPhases: number, 
-    totalDuration: number, 
-    genrePreferences: UserGenrePreference[]
+    numberOfPhases: number,
+    totalDuration: number,
+    startGenre: UserGenrePreference,
+    endGenre: UserGenrePreference,
+    commonGenres: UserGenrePreference[]
   ): Promise<SessionPhase[]> {
     const phases: SessionPhase[] = [];
-    const phaseDuration = Math.floor(totalDuration / numberOfPhases);
+    const phaseDuration = 15; // Max 15 minutes par phase
 
-    for (let i = 1; i <= numberOfPhases; i++) {
+    const startValues: PhaseValues = {
+      genreId: startGenre.genreId,
+      bpm: startGenre.bpm,
+      speechiness: startGenre.speechiness,
+      energy: startGenre.energy
+    };
+
+    const endValues: PhaseValues = {
+      genreId: endGenre.genreId,
+      bpm: endGenre.bpm,
+      speechiness: endGenre.speechiness,
+      energy: endGenre.energy
+    };
+
+    for (let i = 0; i < numberOfPhases; i++) {
+      let phaseValues: PhaseValues;
+
+      if (i === 0) {
+        phaseValues = startValues;
+      } else if (i === numberOfPhases - 1) {
+        phaseValues = endValues;
+      } else {
+        // Fallback si pas de genre commun
+        let commonGenre = commonGenres.length > 0
+          ? commonGenres[(i - 1) % commonGenres.length]
+          : startGenre; // ou endGenre selon ta logique
+
+        phaseValues = this.calculateIntermediatePhaseValues(
+          {
+            genreId: commonGenre.genreId,
+            bpm: commonGenre.bpm,
+            speechiness: commonGenre.speechiness,
+            energy: commonGenre.energy
+          },
+          endValues,
+          i,
+          numberOfPhases
+        );
+      }
+
       const phase = await this.generateSinglePhase(
-        i, 
-        phaseDuration, 
-        genrePreferences, 
+        i + 1,
+        phaseDuration,
+        phaseValues,
+        startValues,
+        endValues,
         numberOfPhases
       );
-      phases.push(phase);
+        phases.push(phase);
+      }
+      return phases;
     }
-
-    return phases;
-  }
 
   private async generateSinglePhase(
-    phaseNumber: number, 
-    phaseDuration: number, 
-    genrePreferences: UserGenrePreference[],
+    phaseNumber: number,
+    phaseDuration: number,
+    phaseValues: PhaseValues,
+    startValues: PhaseValues,
+    endValues: PhaseValues,
     totalPhases: number
   ): Promise<SessionPhase> {
-    const tracks: Track[] = [];
-    
-    // Calculer la progression entre les émotions de départ et d'arrivée
+
+    // Rechercher les tracks avec max 0.1 d'écart
+    const tracks = await this.trackRepository.findByGenreWithCriteria(
+      phaseValues.genreId,
+      phaseValues.bpm,
+      phaseValues.speechiness,
+      phaseValues.energy,
+      0.1, // 10% de tolérance maximum
+      10 // Récupérer plus de tracks pour pouvoir les trier
+    );
+
+
+    // Trier les tracks selon la progression bpm/energy/speechiness
+    const sortedTracks = this.sortTracksForProgression(tracks, startValues, endValues, phaseNumber, totalPhases);
+
+    // Limiter à 5-6 tracks par phase
+    const selectedTracks = sortedTracks.slice(0, Math.min(6, sortedTracks.length));
+
+    // Calculer les valeurs de début et fin de phase pour la transition
     const progressRatio = (phaseNumber - 1) / (totalPhases - 1);
-    
-    for (const genrePreference of genrePreferences) {
-      // 4 chansons avec maximum 10% de différence
-      const similarTracks = await this.trackRepository.findByGenreWithCriteria(
-        genrePreference.genre.id,
-        genrePreference.bpm,
-        genrePreference.speechiness,
-        genrePreference.energy,
-        0.1, // 10% de tolérance
-        4
-      );
-      tracks.push(...similarTracks);
+    const nextProgressRatio = Math.min(1, phaseNumber / (totalPhases - 1));
 
-      // 2 chansons avec transition progressive (50% d'écart max)
-      const transitionTracks = await this.trackRepository.findByGenreWithTransition(
-        genrePreference.genre.id,
-        genrePreferences[0].bpm, // BPM de départ
-        genrePreferences[genrePreferences.length - 1].bpm, // BPM d'arrivée
-        genrePreferences[0].speechiness,
-        genrePreferences[genrePreferences.length - 1].speechiness,
-        genrePreferences[0].energy,
-        genrePreferences[genrePreferences.length - 1].energy,
-        0.5, // 50% d'écart max
-        2
-      );
-      tracks.push(...transitionTracks);
-    }
+    const phaseStartValues = this.interpolateValues(startValues, endValues, progressRatio);
+    const phaseEndValues = this.interpolateValues(startValues, endValues, nextProgressRatio);
 
-    // Limiter à 5-6 musiques par phase
-    const selectedTracks = this.selectTracksForPhase(tracks, 5, 6);
-
-    // Calculer les valeurs de transition pour cette phase
-    const startValues = this.calculatePhaseStartValues(genrePreferences, progressRatio);
-    const endValues = this.calculatePhaseEndValues(genrePreferences, progressRatio);
+    const phaseId = Date.now() + phaseNumber;
+    const phaseIdNumber = Math.floor(phaseId % Number.MAX_SAFE_INTEGER);
 
     return new SessionPhase(
-      0, // ID sera généré
-      0, // sessionId sera défini plus tard
+      phaseIdNumber,
       phaseNumber,
       phaseDuration,
-      startValues.bpm,
-      endValues.bpm,
-      startValues.speechiness,
-      endValues.speechiness,
-      startValues.energy,
-      endValues.energy,
+      phaseStartValues.bpm,
+      phaseEndValues.bpm,
+      phaseStartValues.speechiness,
+      phaseEndValues.speechiness,
+      phaseStartValues.energy,
+      phaseEndValues.energy,
       selectedTracks
     );
   }
 
-  private selectTracksForPhase(availableTracks: Track[], min: number, max: number): Track[] {
-    // Retirer les doublons
-    const uniqueTracks = availableTracks.filter(
-      (track, index, self) => self.findIndex(t => t.id === track.id) === index
-    );
+  private sortTracksForProgression(
+    tracks: Track[],
+    startValues: PhaseValues,
+    endValues: PhaseValues,
+    phaseNumber: number,
+    totalPhases: number
+  ): Track[] {
+    const progressRatio = (phaseNumber - 1) / (totalPhases - 1);
+    
+    return tracks.sort((a, b) => {
+      // Calculer la distance par rapport à la progression souhaitée
+      const targetBpm = startValues.bpm + (endValues.bpm - startValues.bpm) * progressRatio;
+      const targetEnergy = startValues.energy + (endValues.energy - startValues.energy) * progressRatio;
+      const targetSpeechiness = startValues.speechiness + (endValues.speechiness - startValues.speechiness) * progressRatio;
 
-    // Sélectionner aléatoirement entre min et max tracks
-    const targetCount = Math.min(
-      Math.max(min, Math.floor(Math.random() * (max - min + 1)) + min),
-      uniqueTracks.length
-    );
+      const distanceA = Math.abs(a.bpm - targetBpm) + Math.abs(a.energy - targetEnergy) + Math.abs(a.speechiness - targetSpeechiness);
+      const distanceB = Math.abs(b.bpm - targetBpm) + Math.abs(b.energy - targetEnergy) + Math.abs(b.speechiness - targetSpeechiness);
 
-    // Mélanger et sélectionner
-    const shuffled = [...uniqueTracks].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, targetCount);
+      return distanceA - distanceB;
+    });
   }
 
-  private calculatePhaseStartValues(preferences: UserGenrePreference[], progressRatio: number) {
-    // Calculer les valeurs de départ en interpolant entre les préférences
-    const startPreference = preferences[0];
-    const endPreference = preferences[preferences.length - 1];
-
+  private interpolateValues(startValues: PhaseValues, endValues: PhaseValues, ratio: number): PhaseValues {
     return {
-      bpm: Math.round(startPreference.bpm + (endPreference.bpm - startPreference.bpm) * progressRatio),
-      speechiness: Math.round(startPreference.speechiness + (endPreference.speechiness - startPreference.speechiness) * progressRatio),
-      energy: startPreference.energy + (endPreference.energy - startPreference.energy) * progressRatio
+      genreId: startValues.genreId,
+      bpm: Math.round(startValues.bpm + (endValues.bpm - startValues.bpm) * ratio),
+      speechiness: Math.round(startValues.speechiness + (endValues.speechiness - startValues.speechiness) * ratio),
+      energy: startValues.energy + (endValues.energy - startValues.energy) * ratio
     };
   }
 
-  private calculatePhaseEndValues(preferences: UserGenrePreference[], progressRatio: number) {
-    // Calculer les valeurs de fin pour la phase suivante
-    const nextProgressRatio = Math.min(1, progressRatio + (1 / (preferences.length - 1)));
-    return this.calculatePhaseStartValues(preferences, nextProgressRatio);
+  async execute(command: GenerateSessionCommand): Promise<Session> {
+    const { currentUser, emotionStartId, emotionEndId, duration } = command;
+
+    // 1. Validation des émotions
+    const [startEmotion, endEmotion] = await this.validateEmotions(emotionStartId, emotionEndId);
+
+    // 2. Calcul du nombre de phases (durée / 15)
+    const numberOfPhases = Math.floor(duration / 15);
+
+    if (numberOfPhases < 2) {
+      throw new Error('La durée doit permettre au moins 2 phases (minimum 30 minutes)');
+    }
+
+    // 3. Récupération des UserEmotions correspondantes
+    const userEmotions = await this.getUserEmotions(currentUser.id, [emotionStartId, emotionEndId]);
+
+    // 4. Récupération des meilleurs genres pour start et end
+    const [startBestGenre, endBestGenre] = await this.getBestGenrePreferences(userEmotions);
+
+    // 5. Récupération des genres communs pour les phases intermédiaires
+    const commonGenres = await this.getCommonGenrePreferences(userEmotions[0].id, userEmotions[1].id);
+
+    if (numberOfPhases > 2 && commonGenres.length === 0) {
+      console.warn('Aucun genre commun trouvé pour les phases intermédiaires, utilisation des genres de début et fin');
+    }
+
+    // 6. Génération des phases avec les tracks
+    const phases = await this.generatePhases(
+      numberOfPhases,
+      duration,
+      startBestGenre,
+      endBestGenre,
+      commonGenres
+    );
+
+    // 7. Création de la session
+    const session = new Session(
+      0,
+      currentUser.id,
+      duration,
+      startEmotion,
+      endEmotion,
+      phases
+    );
+
+    return this.sessionRepository.create(session);
   }
 }

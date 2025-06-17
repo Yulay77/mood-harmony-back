@@ -1,8 +1,8 @@
 import { PrismaService } from './prisma.service';
 import { Injectable } from '@nestjs/common';
-import { SessionRepository } from 'src/core/domain/repository/session.repository';
+import { SessionRepository } from '../../core/domain/repository/session.repository';
 import { PrismaSessionMapper } from './mapper/prisma-session.mapper';
-import { Session } from 'src/core/domain/model/Session';
+import { Session } from '../../core/domain/model/Session';
 
 @Injectable()
 export class PrismaSessionRepository implements SessionRepository {
@@ -12,32 +12,74 @@ export class PrismaSessionRepository implements SessionRepository {
     this.mapper = new PrismaSessionMapper();
   }
 
+
+  // ...existing code...
   async create(session: Session): Promise<Session> {
-    const entity = this.mapper.fromDomain(session);
-    
-    const createdEntity = await this.prisma.session.create({ 
-      data: entity,
+    const data = {
+      userEmotionProfileId: session.userEmotionalProfileId,
+      duration: session.duration,
+      fromEmotionId: session.fromEmotion.id,
+      toEmotionId: session.toEmotion.id,
+      phases: {
+        create: session.phases?.map((phase, idx) => ({
+          sessionId: session.id,
+          phaseNumber: phase.phaseNumber ?? idx + 1, // phaseNumber correspond à l'ordre dans ton modèle
+          duration: phase.duration, // Ajout du champ duration requis par Prisma
+          fromBpm: phase.fromBpm,
+          toBpm: phase.toBpm,
+          fromSpeechiness: phase.fromSpeechiness,
+          toSpeechiness: phase.toSpeechiness,
+          fromEnergy: phase.fromEnergy,
+          toEnergy: phase.toEnergy,
+          tracks: {
+            create: phase.tracks?.map(track => ({
+              trackId: track.id // Track est un modèle, donc .id
+            })) || []
+          }
+        })) || []
+      }
+    };
+
+    const createdEntity = await this.prisma.session.create({
+      data,
       include: {
-        fromEmotion: true,
-        toEmotion: true,
-        phases: {
+      fromEmotion: true,
+      toEmotion: true,
+      phases: {
+        include: {
+        tracks: {
           include: {
-            tracks: {
-              include: {
-                track: true
-              }
-            }
-          },
-          orderBy: {
-            order_index: 'asc'
+          track: true
           }
         }
+        },
+        select: {
+        id: true,
+        sessionId: true,
+        phaseNumber: true,
+        duration: true,
+        fromBpm: true,
+        toBpm: true,
+        fromSpeechiness: true,
+        toSpeechiness: true,
+        fromEnergy: true,
+        toEnergy: true,
+        tracks: {
+          include: {
+          track: true
+          }
+        }
+        },
+        orderBy: {
+        phaseNumber: 'asc'
+        }
+      }
       }
     });
-    
+
     return this.mapper.toDomain(createdEntity);
   }
-
+// ...existing code...
   async findById(id: number): Promise<Session | null> {
     const entity = await this.prisma.session.findUnique({ 
       where: { id },
@@ -53,7 +95,7 @@ export class PrismaSessionRepository implements SessionRepository {
             }
           },
           orderBy: {
-            order_index: 'asc'
+            phaseNumber: 'asc'
           }
         }
       }
@@ -67,7 +109,7 @@ export class PrismaSessionRepository implements SessionRepository {
   }
 
   async findByUserId(userId: number): Promise<Session[]> {
-    // D'abord, récupérer l'UserEmotionProfile de l'utilisateur
+    // Récupère d'abord le profil émotionnel de l'utilisateur
     const userProfile = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -75,13 +117,13 @@ export class PrismaSessionRepository implements SessionRepository {
       }
     });
 
-    if (!userProfile) {
+    if (!userProfile || !userProfile.emoProfile) {
       return [];
     }
 
     const entities = await this.prisma.session.findMany({
       where: { 
-        userEmotionProfileId: userProfile.emoProfile.id 
+        userEmotionProfileId: userProfile.emoProfile.id
       },
       include: {
         fromEmotion: true,
@@ -95,13 +137,11 @@ export class PrismaSessionRepository implements SessionRepository {
             }
           },
           orderBy: {
-            order_index: 'asc'
+            phaseNumber: 'asc'
           }
         }
       },
-      orderBy: {
-        createdAt: 'desc'
-      }
+     
     });
     
     return entities.map((entity) => this.mapper.toDomain(entity));
@@ -121,13 +161,11 @@ export class PrismaSessionRepository implements SessionRepository {
             }
           },
           orderBy: {
-            order_index: 'asc'
+            phaseNumber: 'asc'
           }
         }
       },
-      orderBy: {
-        createdAt: 'desc'
-      }
+    
     });
     
     return entities.map((entity) => this.mapper.toDomain(entity));
@@ -152,7 +190,7 @@ export class PrismaSessionRepository implements SessionRepository {
               }
             },
             orderBy: {
-              order_index: 'asc'
+              phaseNumber: 'asc'
             }
           }
         }
@@ -165,9 +203,7 @@ export class PrismaSessionRepository implements SessionRepository {
   }
 
   async remove(id: number): Promise<void> {
-    // Supprimer en cascade : d'abord les SessionTrack, puis les SessionPhase, puis la Session
     await this.prisma.$transaction(async (tx) => {
-      // Supprimer les SessionTrack associées
       await tx.sessionTrack.deleteMany({
         where: {
           sessionPhase: {
@@ -175,15 +211,11 @@ export class PrismaSessionRepository implements SessionRepository {
           }
         }
       });
-      
-      // Supprimer les SessionPhase associées
       await tx.sessionPhase.deleteMany({
         where: {
           sessionId: id
         }
       });
-      
-      // Supprimer la Session
       await tx.session.delete({
         where: { id }
       });

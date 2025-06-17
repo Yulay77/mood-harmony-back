@@ -1,10 +1,10 @@
-import { EntityMapper } from '../../../core/base/entity-mapper';
+import { EntityMapper } from 'src/core/base/entity-mapper';
 import { Session } from '../../../core/domain/model/Session';
 import { SessionPhase } from '../../../core/domain/model/SessionPhase';
 import { Track } from '../../../core/domain/model/Track';
 import { Emotion } from '../../../core/domain/model/Emotion';
 import { Injectable } from '@nestjs/common';
-import {Genre} from '../../../core/domain/model/Genre';
+import { Genre } from '../../../core/domain/model/Genre';
 
 // Types Prisma étendus pour inclure les relations
 type SessionEntityWithRelations = {
@@ -18,8 +18,8 @@ type SessionEntityWithRelations = {
   phases?: {
     id: number;
     sessionId: number;
-    name: string;
-    order_index: number;
+    phaseNumber: number;
+    duration: number;
     fromBpm: number;
     toBpm: number;
     fromSpeechiness: number;
@@ -44,12 +44,12 @@ type SessionEntityWithRelations = {
   fromEmotion?: {
     id: number;
     name: string;
-    icon_url: string;
+    iconUrl: string;
   };
   toEmotion?: {
     id: number;
     name: string;
-    icon_url: string;
+    iconUrl: string;
   };
 };
 
@@ -83,44 +83,49 @@ export class PrismaSessionMapper implements EntityMapper<Session, SessionEntityW
     const fromEmotion = new Emotion(
       entity.fromEmotion?.id || entity.fromEmotionId,
       entity.fromEmotion?.name || '',
-      entity.fromEmotion?.icon_url || ''
+      entity.fromEmotion?.iconUrl || ''
     );
 
     const toEmotion = new Emotion(
       entity.toEmotion?.id || entity.toEmotionId,
       entity.toEmotion?.name || '',
-      entity.toEmotion?.icon_url || ''
+      entity.toEmotion?.iconUrl || ''
     );
 
     // Mapper les phases si elles existent
     const phases: SessionPhase[] = entity.phases?.map(phase => {
-    const tracks: Track[] = phase.tracks?.map(sessionTrack =>
-      new Track(
-        sessionTrack.track.id,
-        sessionTrack.track.name,
-        sessionTrack.track.length,
-        sessionTrack.track.track_href,
-        sessionTrack.track.bpm,
-        sessionTrack.track.speechiness,
-        sessionTrack.track.energy,
-        new Genre(sessionTrack.track.genreId, '', '')
-      )
-    ) || [];
+      const tracks: Track[] = phase.tracks?.map(sessionTrack =>
+        new Track(
+          sessionTrack.track.id,
+          sessionTrack.track.name,
+          sessionTrack.track.length,
+          sessionTrack.track.track_href,
+          sessionTrack.track.bpm,
+          sessionTrack.track.speechiness,
+          sessionTrack.track.energy,
+          new Genre(
+            sessionTrack.track.genreId,
+            'Pop', // TODO: Récupérer le vrai nom du genre depuis la DB
+            'icon.url'  // TODO: Récupérer la vraie URL d'icône depuis la DB
+          )
+        )
+      ) || [];
 
-    return new SessionPhase(
-      phase.id,
-      phase.sessionId,
-      phase.order_index,      
-      entity.duration,        
-      phase.fromBpm,
-      phase.toBpm,
-      phase.fromSpeechiness,
-      phase.toSpeechiness,
-      phase.fromEnergy,
-      phase.toEnergy,
-      tracks
-    );
-  }) || [];
+      return new SessionPhase(
+        phase.id,
+        phase.phaseNumber,
+        phase.duration, // CORRECTION: Utiliser phase.duration au lieu de entity.duration
+        phase.fromBpm,
+        phase.toBpm,
+        phase.fromSpeechiness,
+        phase.toSpeechiness,
+        phase.fromEnergy,
+        phase.toEnergy,
+        tracks,
+        phase.sessionId,
+
+      );
+    }) || [];
 
     return new Session(
       entity.id,
