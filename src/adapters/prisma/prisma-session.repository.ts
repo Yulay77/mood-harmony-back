@@ -22,7 +22,6 @@ export class PrismaSessionRepository implements SessionRepository {
       toEmotionId: session.toEmotion.id,
       phases: {
         create: session.phases?.map((phase, idx) => ({
-          sessionId: session.id,
           phaseNumber: phase.phaseNumber ?? idx + 1, // phaseNumber correspond à l'ordre dans ton modèle
           duration: phase.duration, // Ajout du champ duration requis par Prisma
           fromBpm: phase.fromBpm,
@@ -47,31 +46,14 @@ export class PrismaSessionRepository implements SessionRepository {
       toEmotion: true,
       phases: {
         include: {
-        tracks: {
-          include: {
-          track: true
+          tracks: {
+            include: {
+              track: true
+            }
           }
-        }
-        },
-        select: {
-        id: true,
-        sessionId: true,
-        phaseNumber: true,
-        duration: true,
-        fromBpm: true,
-        toBpm: true,
-        fromSpeechiness: true,
-        toSpeechiness: true,
-        fromEnergy: true,
-        toEnergy: true,
-        tracks: {
-          include: {
-          track: true
-          }
-        }
         },
         orderBy: {
-        phaseNumber: 'asc'
+          phaseNumber: "asc"
         }
       }
       }
@@ -113,17 +95,17 @@ export class PrismaSessionRepository implements SessionRepository {
     const userProfile = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        emoProfile: true
+        emotionProfile: true
       }
     });
 
-    if (!userProfile || !userProfile.emoProfile) {
+    if (!userProfile || !userProfile.emotionProfileId) {
       return [];
     }
 
     const entities = await this.prisma.session.findMany({
       where: { 
-        userEmotionProfileId: userProfile.emoProfile.id
+        userEmotionProfileId: userProfile.emotionProfileId
       },
       include: {
         fromEmotion: true,

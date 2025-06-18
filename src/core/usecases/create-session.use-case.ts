@@ -11,9 +11,10 @@ import { Emotion } from '../domain/model/Emotion';
 import { Track } from '../domain/model/Track';
 import { UserGenrePreference } from '../domain/model/UserGenrePreferences';
 import { UserEmotion } from '../domain/model/UserEmotion';
+import { EmotionNotFoundError } from '../domain/error/EmotionNotFoundError';
 
 export type GenerateSessionCommand = {
-  currentUser: Pick<User, 'id'>;
+  userId: number;
   emotionStartId: number;
   emotionEndId: number;
   duration: number; // 30, 45 ou 60 minutes
@@ -39,10 +40,13 @@ export class GenerateSessionUseCase implements UseCase<GenerateSessionCommand, S
     const startEmotion = await this.emotionRepository.findById(startId);
     const endEmotion = await this.emotionRepository.findById(endId);
 
-    if (!startEmotion || !endEmotion) {
-      throw new Error('One or both emotions not found');
+    if (!startEmotion) {
+      throw new EmotionNotFoundError(startId);
     }
-
+    if (!endEmotion) {
+      throw new EmotionNotFoundError(endId);
+    }
+    
     return [startEmotion, endEmotion];
   }
 
@@ -72,13 +76,17 @@ export class GenerateSessionUseCase implements UseCase<GenerateSessionCommand, S
   }
 
   private async getCommonGenrePreferences(
-    startUserEmotionId: number, 
-    endUserEmotionId: number
+    userEmotionIds: number[],
+    limit: number,
+    genreIDsToBan: number[] 
   ): Promise<UserGenrePreference[]> {
+    console.log('Recherche des genres communs pour UserEmotions:', userEmotionIds, 'avec une limite de', limit);
     // Trouver les genres communs entre les deux UserEmotions
-    return await this.userGenrePreferenceRepository.findCommonGenres(
-      [startUserEmotionId, endUserEmotionId], 3
+    const commonGenres = await this.userGenrePreferenceRepository.findCommonGenres(
+      userEmotionIds, limit, genreIDsToBan
     );
+    console.log('Genres communs trouvés:', commonGenres);
+    return commonGenres;
   }
 
   private calculateIntermediatePhaseValues(
@@ -175,7 +183,7 @@ export class GenerateSessionUseCase implements UseCase<GenerateSessionCommand, S
       phaseValues.bpm,
       phaseValues.speechiness,
       phaseValues.energy,
-      0.1, // 10% de tolérance maximum
+      10, // 10% de tolérance maximum
       10 // Récupérer plus de tracks pour pouvoir les trier
     );
 
@@ -241,8 +249,9 @@ export class GenerateSessionUseCase implements UseCase<GenerateSessionCommand, S
     };
   }
 
+
   async execute(command: GenerateSessionCommand): Promise<Session> {
-    const { currentUser, emotionStartId, emotionEndId, duration } = command;
+    const { userId, emotionStartId, emotionEndId, duration } = command;
 
     // 1. Validation des émotions
     const [startEmotion, endEmotion] = await this.validateEmotions(emotionStartId, emotionEndId);
@@ -255,14 +264,28 @@ export class GenerateSessionUseCase implements UseCase<GenerateSessionCommand, S
     }
 
     // 3. Récupération des UserEmotions correspondantes
-    const userEmotions = await this.getUserEmotions(currentUser.id, [emotionStartId, emotionEndId]);
+    const userEmotions = await this.getUserEmotions(userId, [emotionStartId, emotionEndId]);
+    console.log('UserEmotions récupérés:', userEmotions);
+
+    // 3.1. AJOUT: Récupérer le userEmotionProfileId depuis le premier UserEmotion
+    // Tous les UserEmotions d'un utilisateur devraient avoir le même userEmotionProfileId
+    const userEmotionProfileId = userEmotions[0].userEmotionProfileId;
+    
+    if (!userEmotionProfileId) {
+      throw new Error('UserEmotionProfileId not found for user');
+    }
 
     // 4. Récupération des meilleurs genres pour start et end
     const [startBestGenre, endBestGenre] = await this.getBestGenrePreferences(userEmotions);
+    console.log('Meilleurs genres récupérés:', startBestGenre, endBestGenre);
 
     // 5. Récupération des genres communs pour les phases intermédiaires
-    const commonGenres = await this.getCommonGenrePreferences(userEmotions[0].id, userEmotions[1].id);
-
+    const userEmotionIds = userEmotions.map(ue => ue.id);
+    const limit = numberOfPhases - 2;
+    const genreIDsToBan = [startBestGenre.genreId, endBestGenre.genreId];
+    const commonGenres = await this.getCommonGenrePreferences(userEmotionIds, limit, genreIDsToBan);
+    console.log('Genres communs récupérés:', commonGenres);
+    
     if (numberOfPhases > 2 && commonGenres.length === 0) {
       console.warn('Aucun genre commun trouvé pour les phases intermédiaires, utilisation des genres de début et fin');
     }
@@ -276,10 +299,10 @@ export class GenerateSessionUseCase implements UseCase<GenerateSessionCommand, S
       commonGenres
     );
 
-    // 7. Création de la session
+    // 7. Création de la session avec le bon userEmotionProfileId
     const session = new Session(
       0,
-      currentUser.id,
+      userEmotionProfileId, // ✅ CORRECTION: utiliser userEmotionProfileId au lieu de userId
       duration,
       startEmotion,
       endEmotion,
