@@ -1,0 +1,187 @@
+{
+  "id": 1,
+  "userEmotionalProfileId": 1,
+  "duration": 60,
+  "fromEmotion": {
+    "id": 1,
+    "name": "Joie",
+    "iconUrl": "joie-icon.png"
+  },
+  "toEmotion": {
+    "id": 3,
+    "name": "Calme",
+    "iconUrl": "calme-icon.png"
+  },
+  "phases": [
+    {
+      "id": 1,
+      "sessionId": 1,
+      "phaseNumber": 1,
+      "duration": 15,
+      "fromBpm": 128,
+      "toBpm": 115,
+      "fromSpeechiness": 10,
+      "toSpeechiness": 8,
+      "fromEnergy": 85,
+      "toEnergy": 71,
+      "tracks": [
+        {
+          "id": 1,
+          "name": "Sunshine Day",
+          "length": 210,
+          "trackHref": "https://spotify.com/track1",
+          "bpm": 128,
+          "speechiness": 10,
+          "energy": 85,
+          "genre": {
+            "id": 1,
+            "name": "Pop",
+            "iconUrl": "icon.url"
+          }
+        },
+        {
+          "id": 4,
+          "name": "Happy Together",
+          "length": 180,
+          "trackHref": "https://spotify.com/track4",
+          "bpm": 125,
+          "speechiness": 8,
+          "energy": 88,
+          "genre": {
+            "id": 1,
+            "name": "Pop",
+            "iconUrl": "icon.url"
+          }
+        },
+        {
+          "id": 2,
+          "name": "Dancing Queen",
+          "length": 195,
+          "trackHref": "https://spotify.com/track2",
+          "bpm": 132,
+          "speechiness": 12,
+          "energy": 90,
+          "genre": {
+            "id": 1,
+            "name": "Pop",
+            "iconUrl": "icon.url"
+          }
+        },
+        {
+          "id": 3,
+          "name": "Feel Good Inc",
+          "length": 223,
+          "trackHref": "https://spotify.com/track3",
+          "bpm": 130,
+          "speechiness": 15,
+          "energy": 80,
+          "genre": {
+            "id": 1,
+            "name": "Pop",
+            "iconUrl": "icon.url"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "sessionId": 1,
+      "phaseNumber": 2,
+      "duration": 15,
+      "fromBpm": 115,
+      "toBpm": 101,
+      "fromSpeechiness": 8,
+      "toSpeechiness": 6,
+      "fromEnergy": 71,
+      "toEnergy": 58,
+      "tracks": []
+    },
+    {
+      "id": 3,
+      "sessionId": 1,
+      "phaseNumber": 3,
+      "duration": 15,
+      "fromBpm": 101,
+      "toBpm": 88,
+      "fromSpeechiness": 6,
+      "toSpeechiness": 4,
+      "fromEnergy": 58,
+      "toEnergy": 45,
+      "tracks": []
+    },
+    {
+      "id": 4,
+      "sessionId": 1,
+      "phaseNumber": 4,
+      "duration": 15,
+      "fromBpm": 88,
+      "toBpm": 88,
+      "fromSpeechiness": 4,
+      "toSpeechiness": 4,
+      "fromEnergy": 45,
+      "toEnergy": 45,
+      "tracks": [
+        {
+          "id": 9,
+          "name": "Take Five",
+          "length": 324,
+          "trackHref": "https://spotify.com/track9",
+          "bpm": 85,
+          "speechiness": 5,
+          "energy": 45,
+          "genre": {
+            "id": 3,
+            "name": "Pop",
+            "iconUrl": "icon.url"
+          }
+        },
+        {
+          "id": 11,
+          "name": "Autumn Leaves",
+          "length": 298,
+          "trackHref": "https://spotify.com/track11",
+          "bpm": 88,
+          "speechiness": 4,
+          "energy": 50,
+          "genre": {
+            "id": 3,
+            "name": "Pop",
+            "iconUrl": "icon.url"
+          }
+        },
+        {
+          "id": 10,
+          "name": "Blue in Green",
+          "length": 278,
+          "trackHref": "https://spotify.com/track10",
+          "bpm": 90,
+          "speechiness": 3,
+          "energy": 40,
+          "genre": {
+            "id": 3,
+            "name": "Pop",
+            "iconUrl": "icon.url"
+          }
+        },
+        {
+          "id": 12,
+          "name": "Summertime",
+          "length": 256,
+          "trackHref": "https://spotify.com/track12",
+          "bpm": 92,
+          "speechiness": 6,
+          "energy": 42,
+          "genre": {
+            "id": 3,
+            "name": "Pop",
+            "iconUrl": "icon.url"
+          }
+        }
+      ]
+    }
+  ],
+  "totalDuration": 1964,
+  "numberOfPhases": 4,
+  "createdAt": "2025-06-18T17:31:53.743Z",
+  "updatedAt": "2025-06-18T17:31:53.743Z"
+}
